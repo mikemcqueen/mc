@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// App root. Phase 2 adds the button-driven pair classifier; the Phase 1 audio
-/// spike stays reachable on its own tab so it can still be run on-device to
-/// validate AEC.
+/// App root. The Files tab is the Phase 2 process-once queue; the Audio Spike tab
+/// keeps the Phase 1 AEC test reachable on-device.
 struct ContentView: View {
     var body: some View {
         TabView {
-            PairClassifierView()
-                .tabItem { Label("Classifier", systemImage: "checklist") }
+            NavigationStack {
+                FileListView()
+            }
+            .tabItem { Label("Files", systemImage: "tray.full") }
 
             AudioSpikeView()
                 .tabItem { Label("Audio Spike", systemImage: "waveform") }

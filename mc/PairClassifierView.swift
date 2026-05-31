@@ -1,13 +1,16 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
-/// Phase 2 UI: button-driven, no voice yet. Import a word-pair file, step through
-/// it, and Accept / Skip / Back. Accepted pairs are written through to a file in
-/// Documents (visible in Finder and the Files app). This proves the whole data
-/// flow before `Listener` intents replace the buttons in Phase 4.
+/// Phase 2 processing screen for one active file: button-driven, no voice yet.
+/// Step through the pairs with Accept / Skip / Back; accepted pairs are written
+/// through to the Results folder. At the end, "Finish & remove file" deletes the
+/// input so it's never offered again. Backing out without finishing leaves the
+/// file in the queue (progress is not yet persisted — that's Phase 5).
 struct PairClassifierView: View {
+    let file: URL
+    let library: PairLibrary
+
     @StateObject private var store = PairStore()
-    @State private var showImporter = false
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 24) {
@@ -15,7 +18,7 @@ struct PairClassifierView: View {
             Spacer()
             pairCard
             Spacer()
-            controls
+            footer
             if let error = store.lastError {
                 Text(error)
                     .font(.caption)
@@ -24,14 +27,11 @@ struct PairClassifierView: View {
             }
         }
         .padding()
-        .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.plainText, .text, .utf8PlainText],
-                      allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first { store.load(from: url) }
-            case .failure(let error):
-                store.reportError(error.localizedDescription)
+        .navigationTitle(file.lastPathComponent)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if !store.isLoaded {
+                store.load(file: file, resultsDirectory: library.resultsURL)
             }
         }
     }
@@ -39,23 +39,14 @@ struct PairClassifierView: View {
     // MARK: - Sections
 
     private var header: some View {
-        VStack(spacing: 4) {
-            HStack {
-                Button {
-                    showImporter = true
-                } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                }
-                Spacer()
-                Text("Accepted: \(store.acceptedCount)")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            if let source = store.sourceName {
-                Text("\(source) — \(store.progress)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        HStack {
+            Text(store.progress)
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text("Accepted: \(store.acceptedCount)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -68,7 +59,7 @@ struct PairClassifierView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
-        } else if store.isAtEnd {
+        } else {
             VStack(spacing: 8) {
                 Image(systemName: "checkmark.circle")
                     .font(.system(size: 44))
@@ -76,20 +67,29 @@ struct PairClassifierView: View {
                 Text("Done — \(store.acceptedCount) accepted")
                     .font(.title3)
                 if let out = store.outputURL {
-                    Text("Saved to \(out.lastPathComponent)")
+                    Text("Saved to Results/\(out.lastPathComponent)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
             }
-        } else {
-            VStack(spacing: 8) {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.secondary)
-                Text("Import a word-pair file to begin")
-                    .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        if store.isAtEnd {
+            Button(role: .destructive) {
+                library.complete(file)
+                dismiss()
+            } label: {
+                Label("Finish & remove file", systemImage: "checkmark.circle.fill")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+        } else {
+            controls
         }
     }
 
@@ -125,8 +125,4 @@ struct PairClassifierView: View {
         }
         .labelStyle(.titleAndIcon)
     }
-}
-
-#Preview {
-    PairClassifierView()
 }

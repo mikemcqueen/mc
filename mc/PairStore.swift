@@ -1,17 +1,17 @@
 import Foundation
 import Combine
 
-/// Phase 2 model. Loads a word-pair text file (one pair per line) into an ordered
-/// list, tracks the current position, and appends accepted pairs *verbatim* to an
-/// output file in the app's Documents folder. Write-through: each accept hits disk
-/// immediately, so a crash mid-session loses nothing. Knows nothing about audio.
+/// Per-file processor. Loads one word-pair file (one pair per line) into an ordered
+/// list, tracks the current position, and appends accepted pairs *verbatim* to a
+/// result file. Write-through: each accept hits disk immediately, so a crash
+/// mid-session loses nothing. Knows nothing about audio or the file queue.
 @MainActor
 final class PairStore: ObservableObject {
 
     @Published private(set) var pairs: [String] = []
     @Published private(set) var index = 0
     @Published private(set) var acceptedCount = 0
-    @Published private(set) var sourceName: String?
+    @Published private(set) var fileName: String?
     @Published private(set) var outputURL: URL?
     @Published private(set) var lastError: String?
 
@@ -19,7 +19,7 @@ final class PairStore: ObservableObject {
     var current: String? { pairs.indices.contains(index) ? pairs[index] : nil }
     var isAtEnd: Bool { !pairs.isEmpty && index >= pairs.count }
     var hasPrevious: Bool { index > 0 }
-    var isEmpty: Bool { pairs.isEmpty }
+    var isLoaded: Bool { !pairs.isEmpty }
 
     /// 1-based "n / total" for display.
     var progress: String {
@@ -27,9 +27,11 @@ final class PairStore: ObservableObject {
         return "\(min(index + 1, pairs.count)) / \(pairs.count)"
     }
 
+    private let fm = FileManager.default
+
     // MARK: - Loading
 
-    func load(from url: URL) {
+    func load(file url: URL, resultsDirectory: URL) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
@@ -49,9 +51,11 @@ final class PairStore: ObservableObject {
             pairs = lines
             index = 0
             acceptedCount = 0
-            sourceName = url.lastPathComponent
+            fileName = url.lastPathComponent
             lastError = nil
-            prepareOutputFile(for: url)
+            outputURL = uniqueResultURL(
+                in: resultsDirectory,
+                base: url.deletingPathExtension().lastPathComponent + "-accepted")
         } catch {
             reportError("Couldn't read \(url.lastPathComponent): \(error.localizedDescription)")
         }
@@ -59,7 +63,7 @@ final class PairStore: ObservableObject {
 
     // MARK: - Navigation / decisions
 
-    /// Append the current pair to the output file and move on.
+    /// Append the current pair to the result file and move on.
     func accept() {
         guard let line = current else { return }
         append(line)
@@ -76,18 +80,11 @@ final class PairStore: ObservableObject {
 
     // MARK: - Output
 
-    private func prepareOutputFile(for source: URL) {
-        let base = source.deletingPathExtension().lastPathComponent
-        let stamp = Self.stampFormatter.string(from: Date())
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        outputURL = docs.appendingPathComponent("\(base)-accepted-\(stamp).txt")
-    }
-
     private func append(_ line: String) {
         guard let url = outputURL else { return }
         let data = Data((line + "\n").utf8)
         do {
-            if FileManager.default.fileExists(atPath: url.path) {
+            if fm.fileExists(atPath: url.path) {
                 let handle = try FileHandle(forWritingTo: url)
                 defer { try? handle.close() }
                 try handle.seekToEnd()
@@ -102,9 +99,14 @@ final class PairStore: ObservableObject {
 
     func reportError(_ message: String) { lastError = message }
 
-    private static let stampFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        return f
-    }()
+    /// Avoid clobbering results from a previously processed file of the same name.
+    private func uniqueResultURL(in dir: URL, base: String) -> URL {
+        var dest = dir.appendingPathComponent("\(base).txt")
+        var n = 2
+        while fm.fileExists(atPath: dest.path) {
+            dest = dir.appendingPathComponent("\(base) \(n).txt")
+            n += 1
+        }
+        return dest
+    }
 }
