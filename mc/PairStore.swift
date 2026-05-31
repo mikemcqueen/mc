@@ -1,33 +1,45 @@
 import Foundation
 import Combine
 
+enum Decision: Character {
+    case undecided = "u"
+    case accepted = "a"
+    case skipped = "s"
+}
+
 /// Per-file processor. Loads one word-pair file (one pair per line) into an ordered
-/// list, tracks the current position, and appends accepted pairs *verbatim* to a
-/// result file. Write-through: each accept hits disk immediately, so a crash
-/// mid-session loses nothing. Knows nothing about audio or the file queue.
+/// list and records a decision for each pair. Progress is persisted write-through on
+/// every decision (see `ProgressStore`) so the file resumes after a quit; the accepted
+/// pairs are written to a result file only at `finish()`. Knows nothing about audio or
+/// the file queue.
 @MainActor
 final class PairStore: ObservableObject {
 
     @Published private(set) var pairs: [String] = []
-    @Published private(set) var index = 0
-    @Published private(set) var acceptedCount = 0
+    @Published private(set) var decisions: [Decision] = []
+    /// In-memory navigation position. Not persisted — on resume we jump to the first
+    /// undecided pair, since decided pairs are always a contiguous prefix.
+    @Published private(set) var cursor = 0
     @Published private(set) var fileName: String?
-    @Published private(set) var outputURL: URL?
     @Published private(set) var lastError: String?
 
+    private var resultsDirectory: URL?
+    private let fm = FileManager.default
+
     /// The pair awaiting a decision, or nil once the list is exhausted.
-    var current: String? { pairs.indices.contains(index) ? pairs[index] : nil }
-    var isAtEnd: Bool { !pairs.isEmpty && index >= pairs.count }
-    var hasPrevious: Bool { index > 0 }
+    var current: String? { pairs.indices.contains(cursor) ? pairs[cursor] : nil }
+    /// The decision already recorded for the current pair (relevant after Back).
+    var currentDecision: Decision? { decisions.indices.contains(cursor) ? decisions[cursor] : nil }
+    var isAtEnd: Bool { !pairs.isEmpty && cursor >= pairs.count }
+    var hasPrevious: Bool { cursor > 0 }
     var isLoaded: Bool { !pairs.isEmpty }
+    var acceptedCount: Int { decisions.reduce(0) { $0 + ($1 == .accepted ? 1 : 0) } }
 
     /// 1-based "n / total" for display.
     var progress: String {
         guard !pairs.isEmpty else { return "0 / 0" }
-        return "\(min(index + 1, pairs.count)) / \(pairs.count)"
+        return "\(min(cursor + 1, pairs.count)) / \(pairs.count)"
     }
-
-    private let fm = FileManager.default
 
     // MARK: - Loading
 
@@ -49,52 +61,73 @@ final class PairStore: ObservableObject {
             }
 
             pairs = lines
-            index = 0
-            acceptedCount = 0
             fileName = url.lastPathComponent
+            self.resultsDirectory = resultsDirectory
             lastError = nil
-            outputURL = uniqueResultURL(
-                in: resultsDirectory,
-                base: url.deletingPathExtension().lastPathComponent + "-accepted")
+            restoreOrStartFresh()
         } catch {
             reportError("Couldn't read \(url.lastPathComponent): \(error.localizedDescription)")
         }
     }
 
-    // MARK: - Navigation / decisions
-
-    /// Append the current pair to the result file and move on.
-    func accept() {
-        guard let line = current else { return }
-        append(line)
-        acceptedCount += 1
-        advance()
+    private func restoreOrStartFresh() {
+        var restored = [Decision](repeating: .undecided, count: pairs.count)
+        if let name = fileName,
+           let saved = ProgressStore.shared.progress(for: name),
+           saved.total == pairs.count {
+            for (i, ch) in saved.decisions.enumerated() where i < pairs.count {
+                restored[i] = Decision(rawValue: ch) ?? .undecided
+            }
+            cursor = min(saved.decidedCount, pairs.count)   // first undecided
+        } else {
+            cursor = 0
+        }
+        decisions = restored
     }
 
-    /// Skip the current pair without recording it.
-    func skip() { advance() }
+    // MARK: - Navigation / decisions
 
-    func advance() { index = min(index + 1, pairs.count) }
+    func accept() { decide(.accepted) }
+    func skip() { decide(.skipped) }
 
-    func back() { index = max(index - 1, 0) }
+    private func decide(_ decision: Decision) {
+        guard decisions.indices.contains(cursor) else { return }
+        decisions[cursor] = decision
+        cursor = min(cursor + 1, pairs.count)
+        persist()
+    }
 
-    // MARK: - Output
+    func back() { cursor = max(cursor - 1, 0) }
 
-    private func append(_ line: String) {
-        guard let url = outputURL else { return }
-        let data = Data((line + "\n").utf8)
+    // MARK: - Finish
+
+    /// Write accepted pairs verbatim, in order, to a unique result file; return its URL.
+    @discardableResult
+    func finish() -> URL? {
+        guard let dir = resultsDirectory, let name = fileName else { return nil }
+        let base = (name as NSString).deletingPathExtension + "-accepted"
+        let url = uniqueResultURL(in: dir, base: base)
+        let accepted = zip(pairs, decisions).filter { $0.1 == .accepted }.map { $0.0 }
+        let body = accepted.isEmpty ? "" : accepted.joined(separator: "\n") + "\n"
         do {
-            if fm.fileExists(atPath: url.path) {
-                let handle = try FileHandle(forWritingTo: url)
-                defer { try? handle.close() }
-                try handle.seekToEnd()
-                try handle.write(contentsOf: data)
-            } else {
-                try data.write(to: url)
-            }
+            try body.write(to: url, atomically: true, encoding: .utf8)
+            return url
         } catch {
-            reportError("Couldn't save accepted pair: \(error.localizedDescription)")
+            reportError("Couldn't write results: \(error.localizedDescription)")
+            return nil
         }
+    }
+
+    // MARK: - Persistence
+
+    private func persist() {
+        guard let name = fileName else { return }
+        // Decided pairs are a contiguous prefix; store only that.
+        let encoded = decisions
+            .prefix { $0 != .undecided }
+            .map { String($0.rawValue) }
+            .joined()
+        ProgressStore.shared.set(FileProgress(decisions: encoded, total: pairs.count), for: name)
     }
 
     func reportError(_ message: String) { lastError = message }

@@ -31,6 +31,14 @@ final class PairLibrary: ObservableObject {
         files = contents
             .filter { $0.pathExtension.lowercased() == "txt" }   // excludes the Results dir
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        // Forget progress for files no longer present.
+        ProgressStore.shared.prune(keeping: Set(files.map { $0.lastPathComponent }))
+    }
+
+    /// Saved progress for a queued file, if any (for resume display).
+    func progress(for url: URL) -> FileProgress? {
+        ProgressStore.shared.progress(for: url.lastPathComponent)
     }
 
     /// Bring an externally-picked file into the queue by copying it into Documents.
@@ -46,14 +54,21 @@ final class PairLibrary: ObservableObject {
         }
     }
 
-    /// The input file has been fully processed — remove it so it's never offered
-    /// again. Results were already written through to the Results folder.
+    /// The input file has been fully processed — remove it (and its progress) so it's
+    /// never offered again. Results were already written to the Results folder.
     func complete(_ url: URL) {
+        ProgressStore.shared.clear(url.lastPathComponent)
         do {
             try fm.removeItem(at: url)
         } catch {
             lastError = "Couldn't remove \(url.lastPathComponent): \(error.localizedDescription)"
         }
+        refresh()
+    }
+
+    /// Discard saved progress so the file starts over from the top.
+    func restart(_ url: URL) {
+        ProgressStore.shared.clear(url.lastPathComponent)
         refresh()
     }
 

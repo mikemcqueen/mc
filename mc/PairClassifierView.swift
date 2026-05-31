@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// Phase 2 processing screen for one active file: button-driven, no voice yet.
-/// Step through the pairs with Accept / Skip / Back; accepted pairs are written
-/// through to the Results folder. At the end, "Finish & remove file" deletes the
-/// input so it's never offered again. Backing out without finishing leaves the
-/// file in the queue (progress is not yet persisted — that's Phase 5).
+/// Step through the pairs with Accept / Skip / Back; each decision is saved
+/// immediately so the file resumes here after a quit. At the end, "Finish & remove
+/// file" writes the accepted pairs to Results/ and deletes the input so it's never
+/// offered again.
 struct PairClassifierView: View {
     let file: URL
     let library: PairLibrary
@@ -53,25 +53,33 @@ struct PairClassifierView: View {
     @ViewBuilder
     private var pairCard: some View {
         if let current = store.current {
-            Text(current)
-                .font(.system(size: 34, weight: .semibold, design: .rounded))
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 40)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
+            VStack(spacing: 12) {
+                Text(current)
+                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
+                if let decision = store.currentDecision, decision != .undecided {
+                    Text("previously: \(decision == .accepted ? "accepted" : "skipped")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         } else {
             VStack(spacing: 8) {
                 Image(systemName: "checkmark.circle")
                     .font(.system(size: 44))
                     .foregroundStyle(.green)
-                Text("Done — \(store.acceptedCount) accepted")
+                Text("All \(store.pairs.count) reviewed")
                     .font(.title3)
-                if let out = store.outputURL {
-                    Text("Saved to Results/\(out.lastPathComponent)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+                Text("\(store.acceptedCount) accepted")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("Tap Finish to save the results and remove the file.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
         }
     }
@@ -80,6 +88,7 @@ struct PairClassifierView: View {
     private var footer: some View {
         if store.isAtEnd {
             Button(role: .destructive) {
+                store.finish()
                 library.complete(file)
                 dismiss()
             } label: {
