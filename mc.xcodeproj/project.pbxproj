@@ -10,6 +10,16 @@
 		272FDCF42FCC1A7400C612D5 /* mc.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = mc.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		272FDD022FCC1A7500C612D5 /* Exceptions for "mc" folder in "mc" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 272FDCF32FCC1A7400C612D5 /* mc */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		272FDCF62FCC1A7400C612D5 /* mc */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -20,16 +30,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		272FDD022FCC1A7500C612D5 /* Exceptions for "mc" folder in "mc" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 272FDCF32FCC1A7400C612D5 /* mc */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		272FDCF12FCC1A7400C612D5 /* Frameworks */ = {
