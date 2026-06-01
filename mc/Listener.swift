@@ -60,6 +60,13 @@ final class Listener: ObservableObject {
             if !engine.inputNode.isVoiceProcessingEnabled {
                 try engine.inputNode.setVoiceProcessingEnabled(true)   // engages AEC
             }
+            // VPIO is duplex: enabling voice processing routes the engine's *output*
+            // through the same unit for echo cancellation. With nothing connected to
+            // the output graph its render callback has no source and spams
+            // "auou/vpio render err: -1" every cycle. Touching mainMixerNode forces
+            // the lazy mainMixer → output connection so the unit always renders
+            // (silent) audio.
+            _ = engine.mainMixerNode
             engine.prepare()
             try engine.start()
             installRecognition()
