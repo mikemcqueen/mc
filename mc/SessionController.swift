@@ -16,6 +16,13 @@ final class SessionController: ObservableObject {
     /// it so the buttons are understood as the fallback rather than the norm.
     @Published private(set) var voiceUnavailable = false
 
+    /// The most recent command the controller acted on, for an on-screen confirmation
+    /// (and to tell "recognizer is deaf" apart from "heard it but didn't act").
+    @Published private(set) var lastCommand: String?
+
+    /// Live transcription so the classifier screen can show what the mic is hearing.
+    var transcript: [Listener.LogLine] { listener.log }
+
     /// Exposed for the view to read pair text, progress, counts, etc.
     let store = PairStore()
 
@@ -26,6 +33,10 @@ final class SessionController: ObservableObject {
     init() {
         // The view observes this controller, so forward the model's changes upward.
         store.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        // Forward the listener too, so the transcript strip refreshes as lines arrive.
+        listener.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &cancellables)
         speaker.onFinish = { [weak self] in self?.speechFinished() }
@@ -68,6 +79,7 @@ final class SessionController: ObservableObject {
     // MARK: - Dispatch
 
     private func dispatch(_ intent: Intent) {
+        lastCommand = "\(intent)"
         // Barge-in: whatever the command, interrupt any utterance before acting on it.
         speaker.stop()
 

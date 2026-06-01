@@ -27,6 +27,7 @@ struct PairClassifierView: View {
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
             }
+            transcriptStrip
         }
         .padding()
         .navigationTitle(file.lastPathComponent)
@@ -36,6 +37,33 @@ struct PairClassifierView: View {
     }
 
     // MARK: - Sections
+
+    /// Shows the latest recognized text and the last command acted on, so it's clear what
+    /// the mic is hearing and whether a heard word turned into a command.
+    @ViewBuilder
+    private var transcriptStrip: some View {
+        if !session.voiceUnavailable {
+            VStack(alignment: .leading, spacing: 1) {
+                if session.transcript.isEmpty {
+                    Text("…listening")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                }
+                ForEach(session.transcript.suffix(6)) { line in
+                    Text(line.text)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(line.isFinal ? .secondary : .tertiary)
+                        .lineLimit(1)
+                }
+                if let last = session.lastCommand {
+                    Text("last command: \(last)")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.blue)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 
     private var header: some View {
         HStack {

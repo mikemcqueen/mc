@@ -38,18 +38,28 @@ final class Speaker: NSObject, ObservableObject {
     /// Speak `line`, interrupting anything already in flight so a new pair never queues
     /// behind a stale one.
     func speak(_ line: String) {
-        synth.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: line)
-        utterance.rate = rate
-        currentUtterance = utterance
         isSpeaking = true
-        synth.speak(utterance)
+        let rate = rate
+        // Drive the synthesizer from the main dispatch queue, not whatever context
+        // called us. speak()/stop() are reached from voice-command dispatch (the
+        // recognizer callback) and from begin()'s Task — calling AVSpeechSynthesizer
+        // from a structured-concurrency Task trips the "unsafeForcedSync called from
+        // Swift Concurrent context" runtime check and can wedge the shared VPIO audio
+        // graph (taking the mic/recognizer down with it). Same trap SpikeSpeaker avoids.
+        // Build the utterance inside the hop so nothing non-Sendable crosses the closure.
+        onMainQueue {
+            self.synth.stopSpeaking(at: .immediate)
+            let utterance = AVSpeechUtterance(string: line)
+            utterance.rate = rate
+            self.currentUtterance = utterance
+            self.synth.speak(utterance)
+        }
     }
 
     func stop() {
         currentUtterance = nil
         isSpeaking = false
-        synth.stopSpeaking(at: .immediate)
+        onMainQueue { self.synth.stopSpeaking(at: .immediate) }
     }
 
     func faster() { rate = min(rate + rateStep, AVSpeechUtteranceMaximumSpeechRate) }
@@ -59,13 +69,25 @@ final class Speaker: NSObject, ObservableObject {
 extension Speaker: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in
+        // Hop to the main queue (not a Task) for the same reason speak()/stop() do.
+        // Carry the utterance's identity (Sendable) rather than the utterance itself.
+        let finished = ObjectIdentifier(utterance)
+        onMainQueue {
             // Only the utterance still current may clear the flag; an utterance we
             // interrupted reports later and must be ignored.
-            guard utterance === self.currentUtterance else { return }
+            guard let current = self.currentUtterance, ObjectIdentifier(current) == finished
+            else { return }
             self.currentUtterance = nil
             self.isSpeaking = false
             self.onFinish?()
         }
     }
+}
+
+/// Run `body` on the main dispatch queue with main-actor isolation. AVFoundation
+/// (AVSpeechSynthesizer / AVAudioEngine) must be driven from the main *queue*, not the
+/// cooperative executor a `Task { @MainActor }` runs on; the latter trips the
+/// "unsafeForcedSync called from Swift Concurrent context" runtime check.
+nonisolated func onMainQueue(_ body: @escaping @MainActor () -> Void) {
+    DispatchQueue.main.async { MainActor.assumeIsolated(body) }
 }

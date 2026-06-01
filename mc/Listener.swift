@@ -10,11 +10,9 @@ enum Intent {
     case accept, skip, stop, `continue`, `repeat`, back, faster, slower
 }
 
-/// Phase 1 audio spike: always-on, on-device speech recognition running while TTS
-/// plays through the same (AEC-enabled) audio session. Its only job here is to log
-/// every transcription with a timestamp so we can answer the one question that
-/// gates the whole design: *does Apple's acoustic echo cancellation keep the TTS
-/// out of the recognizer?*
+/// Always-on, on-device speech recognition running while TTS plays through the same
+/// (AEC-enabled) audio session. Recognized words map to `Intent`s for hands-free control;
+/// it also keeps a timestamped transcription log that the audio-spike screen surfaces.
 @MainActor
 final class Listener: ObservableObject {
 
@@ -80,20 +78,21 @@ final class Listener: ObservableObject {
             append("✗ on-device recognition unsupported for locale"); return
         }
 
-        do {
-            try configureSession()
-            if !engine.inputNode.isVoiceProcessingEnabled {
-                try engine.inputNode.setVoiceProcessingEnabled(true)   // engages AEC
+        // Voice processing needs a full warm-up cycle. The first engine session after
+        // setVoiceProcessingEnabled(true) never services the mic input (no buffers at all —
+        // the recognizer is deaf); only after the engine + session are torn down and brought
+        // back up does input flow. Confirmed on device over AirPods/HFP, where start → stop →
+        // start was required by hand. So when VPIO isn't engaged yet, bring the engine up
+        // once to engage it, tear it back down, then bring it up for real.
+        if !engine.inputNode.isVoiceProcessingEnabled {
+            do { try bringUpEngine() } catch {
+                append("✗ warm-up failed: \(error.localizedDescription)")
             }
-            // VPIO is duplex: enabling voice processing routes the engine's *output*
-            // through the same unit for echo cancellation. With nothing connected to
-            // the output graph its render callback has no source and spams
-            // "auou/vpio render err: -1" every cycle. Touching mainMixerNode forces
-            // the lazy mainMixer → output connection so the unit always renders
-            // (silent) audio.
-            _ = engine.mainMixerNode
-            engine.prepare()
-            try engine.start()
+            teardown()   // mirrors the manual "stop"; leaves VPIO enabled on the input node
+        }
+
+        do {
+            try bringUpEngine()
             installRecognition()
             startRestartTimer()
             isRunning = true
@@ -102,6 +101,24 @@ final class Listener: ObservableObject {
             append("✗ start failed: \(error.localizedDescription)")
             teardown()
         }
+    }
+
+    /// Configure the session, engage voice processing, and start the engine. No tap is
+    /// installed here — `installRecognition()` does that. Called twice on a cold start (a
+    /// throwaway warm-up cycle, then for real); see `start()`.
+    private func bringUpEngine() throws {
+        try configureSession()
+        if !engine.inputNode.isVoiceProcessingEnabled {
+            try engine.inputNode.setVoiceProcessingEnabled(true)   // engages AEC
+        }
+        // VPIO is duplex: enabling voice processing routes the engine's *output* through the
+        // same unit for echo cancellation. With nothing connected to the output graph its
+        // render callback has no source and spams "auou/vpio render err: -1" every cycle.
+        // Touching mainMixerNode forces the lazy mainMixer → output connection so the unit
+        // always renders (silent) audio.
+        _ = engine.mainMixerNode
+        engine.prepare()
+        try engine.start()
     }
 
     func stop() {
@@ -178,7 +195,11 @@ final class Listener: ObservableObject {
 
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
-            Task { @MainActor in
+            // SFSpeechRecognizer calls back on its own queue. Re-enter the main *queue*
+            // (not a structured-concurrency Task): this handler re-installs the engine
+            // tap and, via onIntent, drives the synthesizer — AVFoundation calls that
+            // trip "unsafeForcedSync" if made from the cooperative executor.
+            onMainQueue {
                 // Ignore callbacks after stop() or from a task we've already replaced.
                 guard self.isRunning, gen == self.generation else { return }
                 if let result {
@@ -199,8 +220,8 @@ final class Listener: ObservableObject {
 
     private func startRestartTimer() {
         restartTimer?.invalidate()
-        restartTimer = Timer.scheduledTimer(withTimeInterval: 50, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.installRecognition() }
+        restartTimer = Timer.scheduledTimer(withTimeInterval: 50, repeats: true) { _ in
+            onMainQueue { [weak self] in self?.installRecognition() }
         }
     }
 
