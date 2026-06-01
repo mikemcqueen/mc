@@ -2,8 +2,9 @@ import SwiftUI
 
 /// Processing screen for one active file. Each pair is read aloud and classified by
 /// voice ("yes/good" accept, "no/bad" reject, "skip/next" pass over, "status" to hear
-/// the current classification, plus stop/continue/repeat/back/faster/slower); the
-/// buttons mirror the core commands as a fallback. Decisions are saved
+/// the current classification, "continue"/"stop" to toggle auto-advance,
+/// "faster"/"slower" to tune the auto-skip delay, plus repeat/back); the buttons mirror
+/// the core commands as a fallback. Decisions are saved
 /// immediately so the file resumes here after a quit. "Finish & remove file" writes the
 /// accepted pairs to Results/ and deletes the input so it's never offered again.
 struct PairClassifierView: View {
@@ -103,8 +104,8 @@ struct PairClassifierView: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { session.repeatCurrent() }
-                if session.state == .paused {
-                    Text("paused — say \"continue\"")
+                if !session.autoAdvance {
+                    Text("stopped — say \"continue\" to auto-advance (\(session.delaySeconds)s)")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 } else if let decision = store.currentDecision, decision != .undecided {
@@ -112,7 +113,7 @@ struct PairClassifierView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("say \"yes\" / \"no\" / \"skip\", or tap the pair to hear it again")
+                    Text("auto-skipping in \(session.delaySeconds)s — say \"yes\" to accept")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

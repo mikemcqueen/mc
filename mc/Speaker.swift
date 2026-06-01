@@ -14,8 +14,7 @@ final class Speaker: NSObject, ObservableObject {
     /// and, later, barge-in.
     @Published private(set) var isSpeaking = false
 
-    /// Applied to every utterance. Adjusted by the faster/slower commands; re-speak the
-    /// current pair after changing it so the new rate is audible.
+    /// Applied to every utterance.
     var rate = AVSpeechUtteranceDefaultSpeechRate
 
     /// Called on the main actor when an utterance finishes *naturally* — not when it's
@@ -23,7 +22,6 @@ final class Speaker: NSObject, ObservableObject {
     var onFinish: (() -> Void)?
 
     private let synth = AVSpeechSynthesizer()
-    private let rateStep: Float = 0.06
     /// The utterance currently being spoken, so a late `didFinish` from an utterance we
     /// already interrupted can't clear `isSpeaking` for its replacement.
     private var currentUtterance: AVSpeechUtterance?
@@ -61,9 +59,6 @@ final class Speaker: NSObject, ObservableObject {
         isSpeaking = false
         onMainQueue { self.synth.stopSpeaking(at: .immediate) }
     }
-
-    func faster() { rate = min(rate + rateStep, AVSpeechUtteranceMaximumSpeechRate) }
-    func slower() { rate = max(rate - rateStep, AVSpeechUtteranceMinimumSpeechRate) }
 }
 
 extension Speaker: AVSpeechSynthesizerDelegate {
