@@ -13,7 +13,7 @@ final class Speaker: NSObject, ObservableObject {
     private let synth = AVSpeechSynthesizer()
     private let phrases = ["apple orange", "table chair", "river mountain"]
     private var index = 0
-    private let gap: Duration = .seconds(1.5)
+    private nonisolated let gap: TimeInterval = 1.5
 
     override init() {
         super.init()
@@ -45,10 +45,14 @@ final class Speaker: NSObject, ObservableObject {
 extension Speaker: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in
-            guard self.isLooping else { return }
-            try? await Task.sleep(for: self.gap)
-            self.speakNext()
+        // Schedule the next phrase on the main run loop rather than re-entering
+        // `speak` from inside a structured-concurrency Task, which trips the
+        // "unsafeForcedSync called from Swift Concurrent context" runtime check.
+        DispatchQueue.main.asyncAfter(deadline: .now() + gap) {
+            MainActor.assumeIsolated {
+                guard self.isLooping else { return }
+                self.speakNext()
+            }
         }
     }
 }

@@ -33,6 +33,12 @@ final class Listener: ObservableObject {
     /// periodically so recognition never silently dies mid-session.
     private var restartTimer: Timer?
 
+    /// Bumped on every (re)install. A task's completion handler captures the
+    /// generation it was created under and bails if it's been superseded — this
+    /// stops a cancelled task from spawning a replacement (which otherwise
+    /// cascades, or after `stop()` leaves a zombie task that starves the next one).
+    private var generation = 0
+
     func start() async {
         guard !isRunning else { return }
 
@@ -51,7 +57,9 @@ final class Listener: ObservableObject {
 
         do {
             try configureSession()
-            try engine.inputNode.setVoiceProcessingEnabled(true)   // engages AEC
+            if !engine.inputNode.isVoiceProcessingEnabled {
+                try engine.inputNode.setVoiceProcessingEnabled(true)   // engages AEC
+            }
             engine.prepare()
             try engine.start()
             installRecognition()
@@ -90,6 +98,13 @@ final class Listener: ObservableObject {
     private func installRecognition() {
         guard let recognizer else { return }
 
+        // Retire any in-flight request/task and mark this generation current so a
+        // late callback from the outgoing task can't reinstall over us.
+        generation &+= 1
+        let gen = generation
+        task?.cancel()
+        request?.endAudio()
+
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = true
@@ -100,18 +115,23 @@ final class Listener: ObservableObject {
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            // The voice-processing input node emits empty priming buffers at engine
+            // start and while TTS ducks the mic; forwarding those triggers
+            // "AVAudioBuffer.mm:281 mDataByteSize (0)". Drop them before appending.
+            guard buffer.frameLength > 0 else { return }
             request.append(buffer)
         }
 
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
             Task { @MainActor in
+                // Ignore callbacks after stop() or from a task we've already replaced.
+                guard self.isRunning, gen == self.generation else { return }
                 if let result {
                     self.append(result.bestTranscription.formattedString,
                                 isFinal: result.isFinal)
-                    if result.isFinal { self.installRecognition() }
                 }
-                if error != nil { self.installRecognition() }
+                if result?.isFinal == true || error != nil { self.installRecognition() }
             }
         }
     }
