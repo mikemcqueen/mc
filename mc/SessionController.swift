@@ -92,7 +92,9 @@ final class SessionController: ObservableObject {
 
         switch intent {
         case .accept:   store.accept(); speakCurrent()
-        case .skip:     store.skip();   speakCurrent()
+        case .skip:     store.skipOrAdvance(); speakCurrent()
+        case .reject:   store.reject(); speakCurrent()
+        case .status:   speakStatus()
         case .back:     store.back();   speakCurrent()
         case .repeat:   speakCurrent()
         case .faster:   speaker.faster(); speakCurrent()
@@ -100,6 +102,23 @@ final class SessionController: ObservableObject {
         case .stop:     pause()
         case .continue: speakCurrent()   // already running; just re-speak
         }
+    }
+
+    /// Speak the current pair's classification aloud without changing it or advancing.
+    private func speakStatus() {
+        let word: String
+        if store.current == nil {
+            word = "done"   // past the end of the list — nothing to classify
+        } else {
+            switch store.currentDecision {
+            case .accepted: word = "accepted"
+            case .skipped:  word = "skipped"
+            default:        word = "unclassified"
+            }
+        }
+        state = .speaking
+        listener.setSpokenLine(word)
+        speaker.speak(word)
     }
 
     private func pause() {

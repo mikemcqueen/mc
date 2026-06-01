@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Processing screen for one active file. Each pair is read aloud and classified by
-/// voice ("yes/good" accept, "no/skip" reject, plus stop/continue/repeat/back/
-/// faster/slower); the buttons mirror every command as a fallback. Decisions are saved
+/// voice ("yes/good" accept, "no/bad" reject, "skip/next" pass over, "status" to hear
+/// the current classification, plus stop/continue/repeat/back/faster/slower); the
+/// buttons mirror the core commands as a fallback. Decisions are saved
 /// immediately so the file resumes here after a quit. "Finish & remove file" writes the
 /// accepted pairs to Results/ and deletes the input so it's never offered again.
 struct PairClassifierView: View {
@@ -111,7 +112,7 @@ struct PairClassifierView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("say \"yes\" / \"no\", or tap the pair to hear it again")
+                    Text("say \"yes\" / \"no\" / \"skip\", or tap the pair to hear it again")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

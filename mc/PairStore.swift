@@ -88,7 +88,20 @@ final class PairStore: ObservableObject {
     // MARK: - Navigation / decisions
 
     func accept() { decide(.accepted) }
-    func skip() { decide(.skipped) }
+
+    /// Explicit rejection ("no"/"bad"): mark skipped no matter the current decision.
+    func reject() { decide(.skipped) }
+
+    /// "skip"/"next": classify as skipped only if still undecided, otherwise leave the
+    /// existing decision untouched and just move past it. Lets a user re-hear a decided
+    /// pair (via `back`) and step forward again without clobbering their earlier call.
+    func skipOrAdvance() {
+        if currentDecision == .undecided {
+            decide(.skipped)
+        } else {
+            cursor = min(cursor + 1, pairs.count)
+        }
+    }
 
     private func decide(_ decision: Decision) {
         guard decisions.indices.contains(cursor) else { return }

@@ -3,11 +3,15 @@ import Combine
 import AVFoundation
 import Speech
 
-/// A recognized voice command. `skip` rejects the current pair (no voice command in the
-/// original design — added so rejection is hands-free too; a future silence timeout can
-/// synthesize it). `continue`/`repeat` are escaped because they're Swift keywords.
+/// A recognized voice command. Two flavors of "move past this pair": `skip` advances
+/// (and skips it only if it's still unclassified, so re-visiting a decided pair with
+/// `back` then `skip` leaves the old decision intact), while `reject` always marks it
+/// skipped — an explicit "no". Neither was in the original design; they were added so
+/// rejection is hands-free too, and a future silence timeout can synthesize `skip`.
+/// `status` speaks the current pair's classification. `continue`/`repeat` are escaped
+/// because they're Swift keywords.
 enum Intent {
-    case accept, skip, stop, `continue`, `repeat`, back, faster, slower
+    case accept, skip, reject, status, stop, `continue`, `repeat`, back, faster, slower
 }
 
 /// Always-on, on-device speech recognition running while TTS plays through the same
@@ -34,11 +38,13 @@ final class Listener: ObservableObject {
     /// the keys double as the recognizer's bias vocabulary (`contextualStrings`).
     static let commands: [String: Intent] = [
         "yes": .accept, "good": .accept, "yep": .accept, "yeah": .accept, "accept": .accept,
-        "no": .skip, "skip": .skip, "next": .skip, "nope": .skip, "bad": .skip,
+        "skip": .skip, "next": .skip,
+        "no": .reject, "nope": .reject, "bad": .reject,
         "stop": .stop, "pause": .stop,
         "continue": .continue, "resume": .continue, "go": .continue,
         "repeat": .repeat, "again": .repeat,
         "back": .back, "previous": .back,
+        "status": .status,
         "faster": .faster, "slower": .slower,
     ]
     static let vocabulary = Array(commands.keys)
