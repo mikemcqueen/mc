@@ -1,4 +1,6 @@
 import SwiftUI
+import Combine
+import AVFoundation
 
 /// Phase 1 throwaway UI: drive the audio spike. Toggle the always-on listener and
 /// the looping TTS independently, watch the live transcription log. The thing to
@@ -7,7 +9,7 @@ import SwiftUI
 /// speak — AEC working?
 struct AudioSpikeView: View {
     @StateObject private var listener = Listener()
-    @StateObject private var speaker = Speaker()
+    @StateObject private var speaker = SpikeSpeaker()
 
     var body: some View {
         VStack(spacing: 12) {
@@ -70,4 +72,59 @@ struct AudioSpikeView: View {
 
 #Preview {
     AudioSpikeView()
+}
+
+/// Phase 1 throwaway: loops a short phrase list through TTS so the spike can observe
+/// whether the always-on `Listener` transcribes its own playback. Self-contained (its
+/// own synthesizer) so the real `Speaker` stays focused on speaking one pair at a time.
+@MainActor
+private final class SpikeSpeaker: NSObject, ObservableObject {
+
+    @Published private(set) var isLooping = false
+
+    private let synth = AVSpeechSynthesizer()
+    private let phrases = ["apple orange", "table chair", "river mountain"]
+    private var index = 0
+    private nonisolated let gap: TimeInterval = 1.5
+
+    override init() {
+        super.init()
+        synth.delegate = self
+        // Use the .playAndRecord session the listener configures, so AEC applies.
+        synth.usesApplicationAudioSession = true
+    }
+
+    func startLooping() {
+        guard !isLooping else { return }
+        isLooping = true
+        speakNext()
+    }
+
+    func stop() {
+        isLooping = false
+        synth.stopSpeaking(at: .immediate)
+    }
+
+    private func speakNext() {
+        guard isLooping else { return }
+        let utterance = AVSpeechUtterance(string: phrases[index % phrases.count])
+        index += 1
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        synth.speak(utterance)
+    }
+}
+
+extension SpikeSpeaker: AVSpeechSynthesizerDelegate {
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didFinish utterance: AVSpeechUtterance) {
+        // Schedule the next phrase on the main run loop rather than re-entering `speak`
+        // from inside a structured-concurrency Task, which trips the
+        // "unsafeForcedSync called from Swift Concurrent context" runtime check.
+        DispatchQueue.main.asyncAfter(deadline: .now() + gap) {
+            MainActor.assumeIsolated {
+                guard self.isLooping else { return }
+                self.speakNext()
+            }
+        }
+    }
 }

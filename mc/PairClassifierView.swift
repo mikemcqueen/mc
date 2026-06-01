@@ -10,6 +10,7 @@ struct PairClassifierView: View {
     let library: PairLibrary
 
     @StateObject private var store = PairStore()
+    @StateObject private var speaker = Speaker()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -33,6 +34,18 @@ struct PairClassifierView: View {
             if !store.isLoaded {
                 store.load(file: file, resultsDirectory: library.resultsURL)
             }
+            speakCurrent()
+        }
+        .onDisappear { speaker.stop() }
+    }
+
+    /// Speak the pair now awaiting a decision (or fall silent at the end of the list).
+    /// Called on appear and after every decision, so deciding *is* the speak→advance loop.
+    private func speakCurrent() {
+        if let current = store.current {
+            speaker.speak(current)
+        } else {
+            speaker.stop()
         }
     }
 
@@ -60,8 +73,21 @@ struct PairClassifierView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 40)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(alignment: .topTrailing) {
+                        if speaker.isSpeaking {
+                            Image(systemName: "speaker.wave.2.fill")
+                                .foregroundStyle(.secondary)
+                                .padding(12)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { speaker.speak(current) }
                 if let decision = store.currentDecision, decision != .undecided {
                     Text("previously: \(decision == .accepted ? "accepted" : "skipped")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("tap the pair to hear it again")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -106,6 +132,7 @@ struct PairClassifierView: View {
         HStack(spacing: 16) {
             Button {
                 store.back()
+                speakCurrent()
             } label: {
                 Label("Back", systemImage: "arrow.uturn.backward")
                     .frame(maxWidth: .infinity)
@@ -115,6 +142,7 @@ struct PairClassifierView: View {
 
             Button {
                 store.skip()
+                speakCurrent()
             } label: {
                 Label("Skip", systemImage: "forward")
                     .frame(maxWidth: .infinity)
@@ -124,6 +152,7 @@ struct PairClassifierView: View {
 
             Button {
                 store.accept()
+                speakCurrent()
             } label: {
                 Label("Accept", systemImage: "checkmark")
                     .frame(maxWidth: .infinity)

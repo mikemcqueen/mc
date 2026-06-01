@@ -88,8 +88,65 @@ All first-party frameworks: `AVFoundation`, `Speech`, `SwiftUI`. Files:
    through the BT earbuds, log every transcription. Answers the only real unknown — *does AEC
    keep TTS out of the recognizer well enough on these earbuds?* — before building the rest.
 2. `PairStore` + document-picker import + Documents-folder output, driven by buttons only.
-3. `Speaker` + speak→advance loop with a manual "Next" button.
-4. `Listener` + full voice command set, barge-in via `SessionController`.
+3. **`Speaker` — read each pair aloud as you reach it.** The goal of this step is to
+   make the *output* half hands-free (TTS) while input is still buttons; voice input is
+   step 4. Concretely:
+   - **Promote the spike `Speaker` to the real one.** It currently exists only as the
+     Phase-1 throwaway that loops a hard-coded `["apple orange", …]` phrase list. Replace
+     that with the Part-C interface: `speak(line)`, `stop()`, a did-finish callback, and an
+     adjustable `rate`. Drop the `phrases`/`index`/`gap` auto-looping — the *list* now comes
+     from `PairStore`, not from `Speaker`.
+   - **The "speak→advance loop" is the existing Accept/Skip/Back loop.** There is no separate
+     "Next" button (the Phase-2 UI advances by *deciding*). So the wiring is: speak
+     `store.current` whenever the current pair changes — on `onAppear`, and after every
+     `accept()` / `skip()` / `back()`. Accept/skip advances the cursor → the next pair speaks;
+     Back moves the cursor back → the prior pair re-speaks. That closed loop is the
+     deliverable.
+   - **Additive over a working screen.** TTS layers on top of the Phase-2 `PairClassifierView`
+     without changing its logic, so the screen stays fully usable (and testable) even with
+     audio muted or no earbuds connected.
+   - **Audio session is deferred to step 4.** Keep `synth.usesApplicationAudioSession = true`
+     so `Speaker` rides whatever session is active rather than owning one; the
+     `.playAndRecord` / `.voiceChat` / AEC configuration arrives with the `Listener` in step 4.
+     Reuse the spike's main-run-loop did-finish dispatch (avoids the structured-concurrency
+     `unsafeForcedSync` trap when re-entering `speak`).
+   - **Verify:** with BT earbuds connected, open a file and confirm each pair is read aloud
+     exactly once; Accept/Skip advances and the next pair speaks; Back re-speaks the previous
+     pair. No speech *recognition* yet — that's step 4.
+4. **`Listener` intents + `SessionController` — close the hands-free loop.** The spike
+   `Listener` already does the genuinely hard part and is kept as-is: always-on, on-device
+   `SFSpeechRecognizer`, AEC via `setVoiceProcessingEnabled(true)`, the ~50 s request-restart
+   timer, generation-guarded callbacks, and empty-priming-buffer filtering. What it does *not*
+   do yet is turn transcriptions into actions — today it only appends them to a log. This step
+   adds that and the controller that drives the session:
+   - **Transcription → `Intent`.** Add the Part-C `Intent` enum
+     (`.accept .stop .continue .repeat .back .faster .slower`) and a small parser over
+     `result.bestTranscription` against the existing `vocabulary` (`yes`/`good` → `.accept`,
+     etc.). Replace the log-append callback with an intent emission (callback or publisher);
+     the spike's `LogLine`/`log` plumbing can be dropped or kept behind a debug flag.
+   - **Fire once per utterance.** Act on partial results for low latency (needed for barge-in),
+     but debounce so a single spoken word doesn't fire its intent repeatedly as partials stream
+     in. The generation guard already prevents superseded tasks from emitting.
+   - **Self-trigger suppression.** Tell the `Listener` which line is currently being spoken so a
+     match equal to (or contained in) that line is ignored — AEC was validated in step 1, this
+     is the belt-and-suspenders the design calls for so a spoken *pair* can't be read back as a
+     command.
+   - **`SessionController` (new file).** The Part-C `ObservableObject` state machine
+     (`.speaking(line) | .awaiting | .paused`) that wires `PairStore` + `Speaker` + `Listener`.
+     On any intent: if speaking, `Speaker.stop()` first (**barge-in**), then dispatch —
+     accept→`store.accept()`, repeat→re-speak, back→`store.back()`, faster/slower→adjust rate &
+     re-speak, stop→`.paused`, continue→resume. The step-3 "speak on cursor change" wiring moves
+     in here.
+   - **Buttons stay as the fallback.** Route the existing Accept/Skip/Back buttons through the
+     same `SessionController` so voice and touch are interchangeable and every command remains
+     testable without speech.
+   - **One open decision — audio-session ownership.** The spike configures
+     `.playAndRecord`/`.voiceChat`/`.allowBluetooth` *inside* `Listener` (and it works);
+     Part C assigns that to `SessionController`. Leave it in `Listener` unless the controller
+     needs to own it for route-change handling (step 5). (Route-change auto-pause itself stays
+     in step 5.)
+   - **Verify:** a full hands-free run, earbuds only — accept via "yes/good", exercise
+     stop/continue/repeat/back/faster/slower, and confirm barge-in interrupts TTS mid-utterance.
 5. Polish: manual pause/resume, route-change auto-pause, session resume after relaunch,
    accepted-count UI.
 
