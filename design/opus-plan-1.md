@@ -119,11 +119,15 @@ All first-party frameworks: `AVFoundation`, `Speech`, `SwiftUI`. Files:
    timer, generation-guarded callbacks, and empty-priming-buffer filtering. What it does *not*
    do yet is turn transcriptions into actions — today it only appends them to a log. This step
    adds that and the controller that drives the session:
-   - **Transcription → `Intent`.** Add the Part-C `Intent` enum
-     (`.accept .stop .continue .repeat .back .faster .slower`) and a small parser over
-     `result.bestTranscription` against the existing `vocabulary` (`yes`/`good` → `.accept`,
-     etc.). Replace the log-append callback with an intent emission (callback or publisher);
-     the spike's `LogLine`/`log` plumbing can be dropped or kept behind a debug flag.
+   - **Transcription → `Intent`.** Add the `Intent` enum
+     (`.accept .skip .stop .continue .repeat .back .faster .slower`) and a small parser over
+     `result.bestTranscription` against a word→intent map that doubles as the recognizer's
+     bias `vocabulary` (`yes`/`good` → `.accept`, `no`/`skip`/`next` → `.skip`, etc.).
+     **`.skip` is a deviation from the locked design's vocabulary** (which had no reject
+     command) — added so rejecting a pair is hands-free too. Future direction: synthesize
+     `.skip` automatically when no command is heard within a short window (so the default
+     becomes skip-on-silence rather than the current stay-and-wait). The log-append callback
+     gains an intent emission alongside it; the `LogLine`/`log` plumbing stays for the spike.
    - **Fire once per utterance.** Act on partial results for low latency (needed for barge-in),
      but debounce so a single spoken word doesn't fire its intent repeatedly as partials stream
      in. The generation guard already prevents superseded tasks from emitting.
@@ -152,7 +156,8 @@ All first-party frameworks: `AVFoundation`, `Speech`, `SwiftUI`. Files:
 
 ## Defaults (revisit later)
 
-- On silence in the listening window: **stay and wait** — never auto-accept, never auto-skip.
+- On silence in the listening window: currently **stay and wait** — never auto-accept, never
+  auto-skip. Planned change: **auto-skip on silence** after a short timeout (never auto-accept).
 - `faster`/`slower`: re-speak the current pair so the new rate is audible.
 - Input format: one pair per line; accepted lines copied **verbatim** to the output file.
 

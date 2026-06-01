@@ -3,6 +3,13 @@ import Combine
 import AVFoundation
 import Speech
 
+/// A recognized voice command. `skip` rejects the current pair (no voice command in the
+/// original design — added so rejection is hands-free too; a future silence timeout can
+/// synthesize it). `continue`/`repeat` are escaped because they're Swift keywords.
+enum Intent {
+    case accept, skip, stop, `continue`, `repeat`, back, faster, slower
+}
+
 /// Phase 1 audio spike: always-on, on-device speech recognition running while TTS
 /// plays through the same (AEC-enabled) audio session. Its only job here is to log
 /// every transcription with a timestamp so we can answer the one question that
@@ -21,8 +28,26 @@ final class Listener: ObservableObject {
     @Published private(set) var log: [LogLine] = []
     @Published private(set) var isRunning = false
 
-    /// Tiny command vocabulary used to bias the recognizer (see design Phase 4).
-    static let vocabulary = ["yes", "good", "stop", "continue", "repeat", "back", "faster", "slower"]
+    /// Called on the main actor with each recognized command. Nil in the audio-spike
+    /// screen, which only wants the raw transcription log; set by `SessionController`.
+    var onIntent: ((Intent) -> Void)?
+
+    /// Spoken-word → command map. Several synonyms per intent so natural phrasings land;
+    /// the keys double as the recognizer's bias vocabulary (`contextualStrings`).
+    static let commands: [String: Intent] = [
+        "yes": .accept, "good": .accept, "yep": .accept, "yeah": .accept, "accept": .accept,
+        "no": .skip, "skip": .skip, "next": .skip, "nope": .skip, "bad": .skip,
+        "stop": .stop, "pause": .stop,
+        "continue": .continue, "resume": .continue, "go": .continue,
+        "repeat": .repeat, "again": .repeat,
+        "back": .back, "previous": .back,
+        "faster": .faster, "slower": .slower,
+    ]
+    static let vocabulary = Array(commands.keys)
+
+    /// Words in the line currently being spoken, so the recognizer transcribing the TTS
+    /// can't fire a command (e.g. a pair containing "back"). Updated by the controller.
+    private var spokenWords: Set<String> = []
 
     private let engine = AVAudioEngine()
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
@@ -88,6 +113,28 @@ final class Listener: ObservableObject {
 
     func clearLog() { log.removeAll() }
 
+    // MARK: - Intent parsing
+
+    /// Tell the listener which line is being spoken so its words are suppressed as
+    /// self-triggers; pass nil once TTS stops.
+    func setSpokenLine(_ line: String?) {
+        spokenWords = Set(Self.words(in: line ?? ""))
+    }
+
+    /// Map a transcription to a command. Scans most-recent-word-first so a correction
+    /// ("yes… no") lands on the latest word, and skips any word that's part of the TTS
+    /// currently playing.
+    private func parse(_ text: String) -> Intent? {
+        for word in Self.words(in: text).reversed() where !spokenWords.contains(word) {
+            if let intent = Self.commands[word] { return intent }
+        }
+        return nil
+    }
+
+    private static func words(in text: String) -> [String] {
+        text.lowercased().split { !$0.isLetter }.map(String.init)
+    }
+
     // MARK: - Audio session
 
     private func configureSession() throws {
@@ -135,8 +182,15 @@ final class Listener: ObservableObject {
                 // Ignore callbacks after stop() or from a task we've already replaced.
                 guard self.isRunning, gen == self.generation else { return }
                 if let result {
-                    self.append(result.bestTranscription.formattedString,
-                                isFinal: result.isFinal)
+                    let text = result.bestTranscription.formattedString
+                    self.append(text, isFinal: result.isFinal)
+                    // Act on partials for low-latency barge-in, then immediately restart
+                    // recognition so one utterance fires its command exactly once.
+                    if self.onIntent != nil, let intent = self.parse(text) {
+                        self.onIntent?(intent)
+                        self.installRecognition()
+                        return
+                    }
                 }
                 if result?.isFinal == true || error != nil { self.installRecognition() }
             }

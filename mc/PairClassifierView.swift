@@ -1,17 +1,18 @@
 import SwiftUI
 
-/// Phase 2 processing screen for one active file: button-driven, no voice yet.
-/// Step through the pairs with Accept / Skip / Back; each decision is saved
-/// immediately so the file resumes here after a quit. At the end, "Finish & remove
-/// file" writes the accepted pairs to Results/ and deletes the input so it's never
-/// offered again.
+/// Processing screen for one active file. Each pair is read aloud and classified by
+/// voice ("yes/good" accept, "no/skip" reject, plus stop/continue/repeat/back/
+/// faster/slower); the buttons mirror every command as a fallback. Decisions are saved
+/// immediately so the file resumes here after a quit. "Finish & remove file" writes the
+/// accepted pairs to Results/ and deletes the input so it's never offered again.
 struct PairClassifierView: View {
     let file: URL
     let library: PairLibrary
 
-    @StateObject private var store = PairStore()
-    @StateObject private var speaker = Speaker()
+    @StateObject private var session = SessionController()
     @Environment(\.dismiss) private var dismiss
+
+    private var store: PairStore { session.store }
 
     var body: some View {
         VStack(spacing: 24) {
@@ -30,23 +31,8 @@ struct PairClassifierView: View {
         .padding()
         .navigationTitle(file.lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            if !store.isLoaded {
-                store.load(file: file, resultsDirectory: library.resultsURL)
-            }
-            speakCurrent()
-        }
-        .onDisappear { speaker.stop() }
-    }
-
-    /// Speak the pair now awaiting a decision (or fall silent at the end of the list).
-    /// Called on appear and after every decision, so deciding *is* the speak→advance loop.
-    private func speakCurrent() {
-        if let current = store.current {
-            speaker.speak(current)
-        } else {
-            speaker.stop()
-        }
+        .onAppear { session.begin(file: file, resultsDirectory: library.resultsURL) }
+        .onDisappear { session.end() }
     }
 
     // MARK: - Sections
@@ -57,6 +43,12 @@ struct PairClassifierView: View {
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
             Spacer()
+            if session.voiceUnavailable {
+                Label("Voice off", systemImage: "mic.slash")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Spacer()
+            }
             Text("Accepted: \(store.acceptedCount)")
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -74,20 +66,24 @@ struct PairClassifierView: View {
                     .padding(.vertical, 40)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
                     .overlay(alignment: .topTrailing) {
-                        if speaker.isSpeaking {
+                        if session.state == .speaking {
                             Image(systemName: "speaker.wave.2.fill")
                                 .foregroundStyle(.secondary)
                                 .padding(12)
                         }
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { speaker.speak(current) }
-                if let decision = store.currentDecision, decision != .undecided {
+                    .onTapGesture { session.repeatCurrent() }
+                if session.state == .paused {
+                    Text("paused — say \"continue\"")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else if let decision = store.currentDecision, decision != .undecided {
                     Text("previously: \(decision == .accepted ? "accepted" : "skipped")")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("tap the pair to hear it again")
+                    Text("say \"yes\" / \"no\", or tap the pair to hear it again")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -114,7 +110,7 @@ struct PairClassifierView: View {
     private var footer: some View {
         if store.isAtEnd {
             Button(role: .destructive) {
-                store.finish()
+                session.finish()
                 library.complete(file)
                 dismiss()
             } label: {
@@ -131,8 +127,7 @@ struct PairClassifierView: View {
     private var controls: some View {
         HStack(spacing: 16) {
             Button {
-                store.back()
-                speakCurrent()
+                session.back()
             } label: {
                 Label("Back", systemImage: "arrow.uturn.backward")
                     .frame(maxWidth: .infinity)
@@ -141,8 +136,7 @@ struct PairClassifierView: View {
             .disabled(!store.hasPrevious)
 
             Button {
-                store.skip()
-                speakCurrent()
+                session.skip()
             } label: {
                 Label("Skip", systemImage: "forward")
                     .frame(maxWidth: .infinity)
@@ -151,8 +145,7 @@ struct PairClassifierView: View {
             .disabled(store.current == nil)
 
             Button {
-                store.accept()
-                speakCurrent()
+                session.accept()
             } label: {
                 Label("Accept", systemImage: "checkmark")
                     .frame(maxWidth: .infinity)
