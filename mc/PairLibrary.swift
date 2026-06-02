@@ -1,9 +1,9 @@
 import Foundation
 import Combine
 
-/// Manages the on-device queue of input files. Drop word-pair `.txt` files into
-/// the app's Documents folder (via Finder file sharing or the Files app, both
-/// enabled in Info.plist) and they show up here. Pick one to process; when it's
+/// Manages the on-device queue of input files. Drop word-pair files (any extension,
+/// or none) into the app's Documents folder (via Finder file sharing or the Files app,
+/// both enabled in Info.plist) and they show up here. Pick one to process; when it's
 /// finished the input file is deleted, so it never appears in the queue again —
 /// each file is processed exactly once. Accepted-pair results are written to a
 /// `Results/` subfolder, which survives deletion of the input.
@@ -29,7 +29,10 @@ final class PairLibrary: ObservableObject {
             options: [.skipsHiddenFiles])) ?? []
 
         files = contents
-            .filter { $0.pathExtension.lowercased() == "txt" }   // excludes the Results dir
+            // Any flat file is a candidate (extension-less files from external workflows
+            // included, matching the importer's `.data` types); skip only directories —
+            // i.e. the Results subfolder. PairStore.load's UTF-8 read is the real validation.
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 
         // Forget progress for files no longer present.
