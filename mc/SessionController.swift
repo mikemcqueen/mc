@@ -56,6 +56,9 @@ final class SessionController: ObservableObject {
             .store(in: &cancellables)
         speaker.onFinish = { [weak self] in self?.speechFinished() }
         listener.onIntent = { [weak self] in self?.dispatch($0) }
+        // Let a selected Kokoro engine play its PCM through the listener's VPIO graph, so
+        // neural TTS is echo-cancelled out of the mic exactly like AVSpeech is.
+        speaker.pcmPlayer = listener
     }
 
     // MARK: - Lifecycle

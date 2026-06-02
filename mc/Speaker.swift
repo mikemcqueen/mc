@@ -2,87 +2,82 @@ import Foundation
 import Combine
 import AVFoundation
 
-/// Reads word-pairs aloud, one line at a time. Owns no list and configures no audio
-/// session: it speaks whatever line the caller hands it and tracks whether it's
-/// currently speaking. It rides the app's active audio session
-/// (`usesApplicationAudioSession`); the `.playAndRecord` / AEC configuration arrives
-/// with the `Listener` in step 4.
+/// Reads word-pairs aloud, one line at a time. `Speaker` is a thin facade: it owns a
+/// `SpeechEngine` chosen at first use from `@AppStorage("ttsEngine")` (`"system"` →
+/// `AVSpeechEngine`, the default and simulator/CI fallback; `"kokoro"` → `KokoroEngine`,
+/// on-device neural TTS) and forwards its whole public surface to it. `SessionController`
+/// talks only to this facade and never learns which engine is speaking.
+///
+/// The facade owns the published `isSpeaking` flag (so it behaves identically across
+/// engines) and routes `onFinish` from whichever engine is active.
 @MainActor
-final class Speaker: NSObject, ObservableObject {
+final class Speaker: ObservableObject {
 
     /// True while an utterance is in flight. Drives the on-screen speaking indicator
-    /// and, later, barge-in.
+    /// and barge-in.
     @Published private(set) var isSpeaking = false
 
-    /// Applied to every utterance.
-    var rate = AVSpeechUtteranceDefaultSpeechRate
+    /// Set when Kokoro was requested but couldn't run (simulator, missing model, or no
+    /// PCM player injected) and we fell back to the system voice. The UI can surface it.
+    @Published private(set) var note: String?
+
+    /// Applied to every utterance. Forwarded to `AVSpeechEngine` (its word-rate scale);
+    /// `KokoroEngine` keeps its own speed default since the scales differ.
+    var rate: Float = AVSpeechUtteranceDefaultSpeechRate {
+        didSet { (engine as? AVSpeechEngine)?.rate = rate }
+    }
 
     /// Called on the main actor when an utterance finishes *naturally* — not when it's
     /// interrupted by `stop()` or a new `speak(_:)`. Lets the controller advance state.
     var onFinish: (() -> Void)?
 
-    private let synth = AVSpeechSynthesizer()
-    /// The utterance currently being spoken, so a late `didFinish` from an utterance we
-    /// already interrupted can't clear `isSpeaking` for its replacement.
-    private var currentUtterance: AVSpeechUtterance?
+    /// Injected by `SessionController` (the `Listener`) before the first `speak(_:)` so a
+    /// selected `KokoroEngine` can play its PCM through the shared VPIO/AEC graph. AVSpeech
+    /// ignores it.
+    weak var pcmPlayer: PCMPlayer?
 
-    override init() {
-        super.init()
-        synth.delegate = self
-        // Ride the app's audio session rather than swapping in our own.
-        synth.usesApplicationAudioSession = true
-    }
+    /// Built lazily on first use, by which point `pcmPlayer` has been injected.
+    private var engine: SpeechEngine?
 
-    /// Speak `line`, interrupting anything already in flight so a new pair never queues
-    /// behind a stale one.
     func speak(_ line: String) {
         isSpeaking = true
-        let rate = rate
-        // Drive the synthesizer from the main dispatch queue, not whatever context
-        // called us. speak()/stop() are reached from voice-command dispatch (the
-        // recognizer callback) and from begin()'s Task — calling AVSpeechSynthesizer
-        // from a structured-concurrency Task trips the "unsafeForcedSync called from
-        // Swift Concurrent context" runtime check and can wedge the shared VPIO audio
-        // graph (taking the mic/recognizer down with it). Same trap SpikeSpeaker avoids.
-        // Build the utterance inside the hop so nothing non-Sendable crosses the closure.
-        onMainQueue {
-            self.synth.stopSpeaking(at: .immediate)
-            let utterance = AVSpeechUtterance(string: line)
-            utterance.rate = rate
-            self.currentUtterance = utterance
-            self.synth.speak(utterance)
-        }
+        currentEngine().speak(line)
     }
 
     func stop() {
-        currentUtterance = nil
         isSpeaking = false
-        onMainQueue { self.synth.stopSpeaking(at: .immediate) }
+        engine?.stop()
     }
-}
 
-extension Speaker: AVSpeechSynthesizerDelegate {
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                                       didFinish utterance: AVSpeechUtterance) {
-        // Hop to the main queue (not a Task) for the same reason speak()/stop() do.
-        // Carry the utterance's identity (Sendable) rather than the utterance itself.
-        let finished = ObjectIdentifier(utterance)
-        onMainQueue {
-            // Only the utterance still current may clear the flag; an utterance we
-            // interrupted reports later and must be ignored.
-            guard let current = self.currentUtterance, ObjectIdentifier(current) == finished
-            else { return }
-            self.currentUtterance = nil
-            self.isSpeaking = false
-            self.onFinish?()
+    // MARK: - Engine selection
+
+    private func currentEngine() -> SpeechEngine {
+        if let engine { return engine }
+        let chosen = makeEngine()
+        chosen.onFinish = { [weak self] in self?.finished() }
+        engine = chosen
+        return chosen
+    }
+
+    private func makeEngine() -> SpeechEngine {
+        if UserDefaults.standard.string(forKey: "ttsEngine") == "kokoro" {
+            #if canImport(KokoroSwift)
+            if KokoroEngine.isAvailable, let player = pcmPlayer,
+               let kokoro = KokoroEngine(player: player) {
+                kokoro.warmUp()
+                return kokoro
+            }
+            #endif
+            // Requested but unavailable here — keep the app usable on the system voice.
+            note = "Kokoro unavailable — using the system voice."
         }
+        let av = AVSpeechEngine()
+        av.rate = rate
+        return av
     }
-}
 
-/// Run `body` on the main dispatch queue with main-actor isolation. AVFoundation
-/// (AVSpeechSynthesizer / AVAudioEngine) must be driven from the main *queue*, not the
-/// cooperative executor a `Task { @MainActor }` runs on; the latter trips the
-/// "unsafeForcedSync called from Swift Concurrent context" runtime check.
-nonisolated func onMainQueue(_ body: @escaping @MainActor () -> Void) {
-    DispatchQueue.main.async { MainActor.assumeIsolated(body) }
+    private func finished() {
+        isSpeaking = false
+        onFinish?()
+    }
 }

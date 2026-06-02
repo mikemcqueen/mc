@@ -18,7 +18,7 @@ enum Intent {
 /// (AEC-enabled) audio session. Recognized words map to `Intent`s for hands-free control;
 /// it also keeps a timestamped transcription log that the audio-spike screen surfaces.
 @MainActor
-final class Listener: ObservableObject {
+final class Listener: ObservableObject, PCMPlayer {
 
     struct LogLine: Identifiable {
         let id = UUID()
@@ -57,6 +57,15 @@ final class Listener: ObservableObject {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+
+    /// Lazily attached when `KokoroEngine` first plays PCM through us. Kept for the life
+    /// of the engine so we don't churn the graph per utterance. Nil under AVSpeech, which
+    /// rides the app session directly and never calls `play(_:)`.
+    private var playerNode: AVAudioPlayerNode?
+    /// Bumped on every `play`/`stopPlayback` so a buffer's completion handler — which
+    /// fires on an audio thread after we may have barged in — only delivers `onDone` if
+    /// it's still the buffer we're waiting on. Mirrors `generation` for recognition.
+    private var playbackGeneration = 0
 
     /// On-device requests have a finite lifetime (~1 min). Recreate the request
     /// periodically so recognition never silently dies mid-session.
@@ -135,6 +144,55 @@ final class Listener: ObservableObject {
     }
 
     func clearLog() { log.removeAll() }
+
+    // MARK: - PCM playback (Kokoro)
+
+    /// Play `samples` through the VPIO engine so the same voice-processing unit that
+    /// cancels AVSpeech also cancels Kokoro's audio out of the mic. The engine must
+    /// already be running (it is whenever a session is active); attaches one reusable
+    /// `AVAudioPlayerNode` on first use.
+    func play(_ samples: [Float], sampleRate: Double, onDone: @escaping () -> Void) {
+        guard !samples.isEmpty,
+              let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                            frameCapacity: AVAudioFrameCount(samples.count)) else {
+            onDone(); return
+        }
+
+        buffer.frameLength = buffer.frameCapacity
+        samples.withUnsafeBufferPointer { src in
+            buffer.floatChannelData![0].update(from: src.baseAddress!, count: src.count)
+        }
+
+        let node: AVAudioPlayerNode
+        if let existing = playerNode {
+            node = existing
+        } else {
+            node = AVAudioPlayerNode()
+            engine.attach(node)
+            // Connect once; the mixer resamples our 24 kHz mono to the engine's I/O rate.
+            engine.connect(node, to: engine.mainMixerNode, format: format)
+            playerNode = node
+        }
+
+        playbackGeneration &+= 1
+        let gen = playbackGeneration
+        node.scheduleBuffer(buffer, at: nil, options: .interrupts) {
+            // Completion fires on an audio thread; hop to main and ignore it if a newer
+            // play or a stopPlayback() (barge-in) has since superseded this buffer.
+            onMainQueue { [weak self] in
+                guard let self, gen == self.playbackGeneration else { return }
+                onDone()
+            }
+        }
+        node.play()
+    }
+
+    /// Cut off any buffer in flight (barge-in) without firing its `onDone`.
+    func stopPlayback() {
+        playbackGeneration &+= 1
+        playerNode?.stop()
+    }
 
     // MARK: - Intent parsing
 
@@ -235,6 +293,7 @@ final class Listener: ObservableObject {
         restartTimer?.invalidate(); restartTimer = nil
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
+        playbackGeneration &+= 1; playerNode?.stop()
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

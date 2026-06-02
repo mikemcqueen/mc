@@ -16,3 +16,6 @@ xcuserdata/
 # Swift Package Manager
 .swiftpm/
 .build/
+
+# Bundled TTS models (fetched via ./fetch-models.sh, kept out of git)
+mc/Resources/

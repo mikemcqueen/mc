@@ -6,6 +6,26 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AA00000000000000000000A3 /* KokoroSwift in Frameworks */ = {isa = PBXBuildFile; productRef = AA00000000000000000000A2 /* KokoroSwift */; };
+		AA00000000000000000000C3 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = AA00000000000000000000C2 /* MLX */; };
+		AA00000000000000000000B1 /* KokoroSwift in Embed Frameworks */ = {isa = PBXBuildFile; productRef = AA00000000000000000000A2 /* KokoroSwift */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		AA00000000000000000000B0 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				AA00000000000000000000B1 /* KokoroSwift in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		272FDCF42FCC1A7400C612D5 /* mc.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = mc.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -36,6 +56,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA00000000000000000000A3 /* KokoroSwift in Frameworks */,
+				AA00000000000000000000C3 /* MLX in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -68,6 +90,7 @@
 				272FDCF02FCC1A7400C612D5 /* Sources */,
 				272FDCF12FCC1A7400C612D5 /* Frameworks */,
 				272FDCF22FCC1A7400C612D5 /* Resources */,
+				AA00000000000000000000B0 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -78,6 +101,8 @@
 			);
 			name = mc;
 			packageProductDependencies = (
+				AA00000000000000000000A2 /* KokoroSwift */,
+				AA00000000000000000000C2 /* MLX */,
 			);
 			productName = mc;
 			productReference = 272FDCF42FCC1A7400C612D5 /* mc.app */;
@@ -107,6 +132,10 @@
 			);
 			mainGroup = 272FDCEB2FCC1A7400C612D5;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AA00000000000000000000A1 /* XCRemoteSwiftPackageReference "kokoro-ios" */,
+				AA00000000000000000000C1 /* XCRemoteSwiftPackageReference "mlx-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 272FDCF52FCC1A7400C612D5 /* Products */;
 			projectDirPath = "";
@@ -347,6 +376,38 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA00000000000000000000A1 /* XCRemoteSwiftPackageReference "kokoro-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mlalma/kokoro-ios.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.10;
+			};
+		};
+		AA00000000000000000000C1 /* XCRemoteSwiftPackageReference "mlx-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift";
+			requirement = {
+				kind = exactVersion;
+				version = 0.29.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA00000000000000000000A2 /* KokoroSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA00000000000000000000A1 /* XCRemoteSwiftPackageReference "kokoro-ios" */;
+			productName = KokoroSwift;
+		};
+		AA00000000000000000000C2 /* MLX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA00000000000000000000C1 /* XCRemoteSwiftPackageReference "mlx-swift" */;
+			productName = MLX;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 272FDCEC2FCC1A7400C612D5 /* Project object */;
 }
