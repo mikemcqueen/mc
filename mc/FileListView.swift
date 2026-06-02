@@ -16,7 +16,7 @@ struct FileListView: View {
                 ContentUnavailableView {
                     Label("No files", systemImage: "tray")
                 } description: {
-                    Text("Add files with the + button, or drop .txt files into this app's folder in Finder or the Files app.")
+                    Text("Add files with the + button, or drop pair files into this app's folder in Finder or the Files app.")
                 }
             } else {
                 Section("To process") {
@@ -39,7 +39,11 @@ struct FileListView: View {
             PairClassifierView(file: url, library: library)
         }
         .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.plainText, .text, .utf8PlainText],
+                      // Accept any flat file (.data), not just .text-class types, so
+                      // extension-less word-pair files load without renaming. The UTF-8
+                      // read in PairStore.load(file:) is the real validation and fails
+                      // gracefully on non-text input.
+                      allowedContentTypes: [.data],
                       allowsMultipleSelection: true) { result in
             if case .success(let urls) = result {
                 urls.forEach(library.importFile)
