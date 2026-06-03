@@ -26,9 +26,9 @@ final class AVSpeechEngine: NSObject, SpeechEngine {
         synth.usesApplicationAudioSession = true
     }
 
-    func speak(_ line: String) {
+    func speak(_ line: String, rateScale: Float) {
         isSpeaking = true
-        let rate = rate
+        let rate = rate * rateScale
         // Drive the synthesizer from the main dispatch queue, not whatever context
         // called us. speak()/stop() are reached from voice-command dispatch (the
         // recognizer callback) and from begin()'s Task — calling AVSpeechSynthesizer

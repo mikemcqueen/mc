@@ -8,10 +8,11 @@ import Speech
 /// `back` then `skip` leaves the old decision intact), while `reject` always marks it
 /// skipped — an explicit "no". Neither was in the original design; they were added so
 /// rejection is hands-free too, and a future silence timeout can synthesize `skip`.
-/// `status` speaks the current pair's classification. `continue`/`repeat` are escaped
-/// because they're Swift keywords.
+/// `status` speaks the current pair's classification. `repeatSlowly` re-reads the current
+/// pair once at half speed without changing the decision or position. `continue`/`repeat`
+/// are escaped because they're Swift keywords.
 enum Intent {
-    case accept, skip, reject, status, stop, `continue`, `repeat`, back, faster, slower
+    case accept, skip, reject, status, stop, `continue`, `repeat`, repeatSlowly, back, faster, slower
 }
 
 /// Always-on, on-device speech recognition running while TTS plays through the same
@@ -43,6 +44,7 @@ final class Listener: ObservableObject, PCMPlayer {
         "stop": .stop, "pause": .stop,
         "continue": .continue, "resume": .continue, "go": .continue,
         "repeat": .repeat, "again": .repeat,
+        "slowly": .repeatSlowly, "slow": .repeatSlowly,
         "back": .back, "previous": .back,
         "status": .status,
         "faster": .faster, "slower": .slower,

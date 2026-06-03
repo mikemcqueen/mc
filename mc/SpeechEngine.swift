@@ -26,10 +26,12 @@ protocol SpeechEngine: AnyObject {
     /// Defaults to false; the controller only bothers pre-generating when it's true.
     var supportsPreGeneration: Bool { get }
 
-    /// Speak `line`, interrupting anything already in flight so a new pair never queues
-    /// behind a stale one. If `line` was previously `prefetch`ed it plays without the
-    /// synthesis delay.
-    func speak(_ line: String)
+    /// Speak `line` at `rateScale`× the engine's normal rate (1.0 = normal, 0.5 = half
+    /// speed), interrupting anything already in flight so a new pair never queues behind a
+    /// stale one. The scale is transient — it applies to this utterance only and never
+    /// changes the persistent `rate`. At `rateScale` 1.0, a previously `prefetch`ed `line`
+    /// plays without the synthesis delay.
+    func speak(_ line: String, rateScale: Float)
 
     /// Stop any utterance in flight without firing `onFinish`.
     func stop()
@@ -49,6 +51,11 @@ extension SpeechEngine {
     var supportsPreGeneration: Bool { false }
     func prefetch(_ line: String) {}
     func retain(_ lines: [String]) {}
+}
+
+extension SpeechEngine {
+    /// Speak `line` at the engine's normal rate.
+    func speak(_ line: String) { speak(line, rateScale: 1.0) }
 }
 
 /// Plays raw mono Float PCM through an audio graph. `KokoroEngine` produces `[Float]`

@@ -18,7 +18,7 @@ struct mcApp: App {
         // system voice regardless.
         UserDefaults.standard.register(defaults: [
             "ttsEngine": "kokoro",
-            "kokoroVoice": "af_heart",
+            "kokoroVoice": "af_jessica",
         ])
     }
 

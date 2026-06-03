@@ -39,9 +39,11 @@ final class Speaker: ObservableObject {
     /// Built lazily on first use, by which point `pcmPlayer` has been injected.
     private var engine: SpeechEngine?
 
-    func speak(_ line: String) {
+    /// Speak `line` at `rateScale`× the active engine's normal rate (1.0 = normal). The
+    /// scale is transient and never mutates the persistent `rate`.
+    func speak(_ line: String, rateScale: Float = 1.0) {
         isSpeaking = true
-        currentEngine().speak(line)
+        currentEngine().speak(line, rateScale: rateScale)
     }
 
     func stop() {

@@ -95,6 +95,7 @@ final class SessionController: ObservableObject {
     func skip()   { dispatch(.skip) }
     func back()   { dispatch(.back) }
     func repeatCurrent() { dispatch(.repeat) }
+    func repeatSlowly()  { dispatch(.repeatSlowly) }
 
     // MARK: - Dispatch
 
@@ -111,6 +112,7 @@ final class SessionController: ObservableObject {
         case .status:   speakStatus()
         case .back:     store.back();   speakCurrent()
         case .repeat:   speakCurrent()
+        case .repeatSlowly: speakCurrentSlowly()
         case .faster:   adjustDelay(by: -1)
         case .slower:   adjustDelay(by: +1)
         case .stop:     autoAdvance = false   // timer already cancelled above
@@ -176,11 +178,20 @@ final class SessionController: ObservableObject {
         if let next = store.line(at: 1)  { speaker.prefetch(next) }
     }
 
+    /// Re-read the current pair once at half speed without changing its decision or the
+    /// position — a transient, one-off slow playback ("repeat slowly"). The slow rate is
+    /// not retained: the next pair (or a plain "repeat") speaks at normal speed again.
+    private func speakCurrentSlowly() {
+        guard let line = store.current else { return }
+        speak(line, rateScale: 0.5)
+    }
+
     /// Speak `text`, suppressing its own words so the recognizer can't self-trigger.
-    private func speak(_ text: String) {
+    /// `rateScale` (1.0 = normal) applies to this utterance only.
+    private func speak(_ text: String, rateScale: Float = 1.0) {
         state = .speaking
         listener.setSpokenLine(text)
-        speaker.speak(text)
+        speaker.speak(text, rateScale: rateScale)
     }
 
     private func speechFinished() {

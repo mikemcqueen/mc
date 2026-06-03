@@ -87,11 +87,11 @@ final class KokoroEngine: SpeechEngine {
         queue.async { _ = synth.generate(text: "ready", voiceName: voice, speed: 1.0) }
     }
 
-    func speak(_ line: String) {
+    func speak(_ line: String, rateScale: Float) {
         isSpeaking = true
         generation &+= 1
         let gen = generation
-        generate(line) { [weak self] audio in
+        generate(line, speed: rate * rateScale) { [weak self] audio in
             guard let self, gen == self.generation else { return }   // superseded by stop/newer speak
             guard let audio, let player = self.player else {
                 // Generation failed (bad voice / model) — don't wedge the session;
@@ -108,7 +108,7 @@ final class KokoroEngine: SpeechEngine {
     /// Synthesize `line` ahead of time so a later `speak` of it plays instantly. Does not
     /// touch `generation`, so it never disturbs what's currently playing.
     func prefetch(_ line: String) {
-        generate(line) { _ in }
+        generate(line, speed: rate) { _ in }
     }
 
     /// Drop every cached clip except the ones for `lines` (under the current voice/speed),
@@ -120,13 +120,12 @@ final class KokoroEngine: SpeechEngine {
         cache = cache.filter { keep.contains($0.key) }
     }
 
-    /// Resolve the PCM for `line` under the current voice/speed and hand it to `then` (always
-    /// on the main actor, exactly once): serve it from `cache`, join an in-flight job for the
-    /// same key via `pending`, or enqueue a fresh MLX generation. `then` may receive nil if
-    /// generation fails.
-    private func generate(_ line: String, then: @escaping ([Float]?) -> Void) {
+    /// Resolve the PCM for `line` at `speed` and hand it to `then` (always on the main actor,
+    /// exactly once): serve it from `cache`, join an in-flight job for the same key via
+    /// `pending`, or enqueue a fresh MLX generation. `then` may receive nil if generation
+    /// fails.
+    private func generate(_ line: String, speed: Float, then: @escaping ([Float]?) -> Void) {
         let voice = Self.currentVoiceName
-        let speed = rate
         let key = Self.cacheKey(line: line, voice: voice, speed: speed)
 
         if let cached = cache[key] {
@@ -165,10 +164,8 @@ final class KokoroEngine: SpeechEngine {
         onFinish?()
     }
 
-    /// The selected voice's base name (e.g. `af_heart`), read fresh so a Settings change
-    /// takes effect on the next pair. Defaults to Kokoro's flagship US-English voice.
     static var currentVoiceName: String {
-        UserDefaults.standard.string(forKey: "kokoroVoice") ?? "af_heart"
+        UserDefaults.standard.string(forKey: "kokoroVoice") ?? "af_jessica"
     }
 
     /// Identity of a rendered clip: text plus the voice and speed it was rendered at, so the
