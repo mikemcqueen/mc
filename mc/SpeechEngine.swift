@@ -19,12 +19,36 @@ protocol SpeechEngine: AnyObject {
     /// interrupted by `stop()` or a new `speak(_:)`. Lets the controller advance state.
     var onFinish: (() -> Void)? { get set }
 
+    /// Whether this engine pays a per-utterance synthesis cost worth hiding by generating
+    /// ahead of time. Streaming/system engines (`AVSpeechEngine`) return false; engines
+    /// that synthesize a whole clip up front — neural (`KokoroEngine`) or a future remote
+    /// one — return true and implement `prefetch`/`retain` so navigation plays instantly.
+    /// Defaults to false; the controller only bothers pre-generating when it's true.
+    var supportsPreGeneration: Bool { get }
+
     /// Speak `line`, interrupting anything already in flight so a new pair never queues
-    /// behind a stale one.
+    /// behind a stale one. If `line` was previously `prefetch`ed it plays without the
+    /// synthesis delay.
     func speak(_ line: String)
 
     /// Stop any utterance in flight without firing `onFinish`.
     func stop()
+
+    /// Synthesize `line` ahead of time and cache the result, so a later `speak(_:)` of the
+    /// same line plays immediately. No-op on engines without pre-generation.
+    func prefetch(_ line: String)
+
+    /// Bound the pre-generation cache to `lines` (the ones worth keeping ready, e.g.
+    /// prev/current/next), discarding anything else. No-op without pre-generation.
+    func retain(_ lines: [String])
+}
+
+/// No-op defaults so streaming engines opt out of pre-generation for free; engines that
+/// support it (e.g. `KokoroEngine`) override all three.
+extension SpeechEngine {
+    var supportsPreGeneration: Bool { false }
+    func prefetch(_ line: String) {}
+    func retain(_ lines: [String]) {}
 }
 
 /// Plays raw mono Float PCM through an audio graph. `KokoroEngine` produces `[Float]`

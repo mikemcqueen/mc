@@ -161,6 +161,19 @@ final class SessionController: ObservableObject {
             state = .idle
             listener.setSpokenLine(nil)
         }
+        prepareNeighbors()
+    }
+
+    /// Keep prev/current/next synthesized and cached (on engines that support it) so
+    /// next/prev/back play without a generation delay; drop anything further out. At the end
+    /// of the list there's no current, but the previous line is still retained/prefetched so
+    /// `back` stays instant.
+    private func prepareNeighbors() {
+        guard speaker.supportsPreGeneration else { return }
+        let neighbors = [-1, 0, 1].compactMap { store.line(at: $0) }
+        speaker.retain(neighbors)
+        if let prev = store.line(at: -1) { speaker.prefetch(prev) }
+        if let next = store.line(at: 1)  { speaker.prefetch(next) }
     }
 
     /// Speak `text`, suppressing its own words so the recognizer can't self-trigger.

@@ -28,6 +28,12 @@ final class PairStore: ObservableObject {
 
     /// The pair awaiting a decision, or nil once the list is exhausted.
     var current: String? { pairs.indices.contains(cursor) ? pairs[cursor] : nil }
+    /// The pair `offset` positions from the cursor (negative = earlier), or nil if out of
+    /// range. Used to pre-generate prev/current/next audio.
+    func line(at offset: Int) -> String? {
+        let i = cursor + offset
+        return pairs.indices.contains(i) ? pairs[i] : nil
+    }
     /// The decision already recorded for the current pair (relevant after Back).
     var currentDecision: Decision? { decisions.indices.contains(cursor) ? decisions[cursor] : nil }
     var isAtEnd: Bool { !pairs.isEmpty && cursor >= pairs.count }

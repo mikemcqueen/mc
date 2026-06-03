@@ -19,11 +19,23 @@ final class KokoroEngine: SpeechEngine {
 
     private(set) var isSpeaking = false
 
+    /// Kokoro pays a per-utterance synthesis cost, so it pre-generates prev/current/next.
+    let supportsPreGeneration = true
+
     /// Kokoro speed multiplier (1.0 = normal). Independent of `AVSpeechEngine`'s word-rate
     /// scale; the `Speaker` facade does not forward AVSpeech rates here.
     var rate: Float = 1.0
 
     var onFinish: (() -> Void)?
+
+    /// Ready-to-play PCM, keyed by voice+speed+text (see `cacheKey`) so a Settings voice or
+    /// speed change never replays a stale render. Bounded to a handful of clips by `retain`.
+    private var cache: [String: [Float]] = [:]
+
+    /// Completions waiting on an in-flight generation, keyed the same way. Lets a `speak` (or
+    /// a second `prefetch`) that lands on a line already being generated *join* that job
+    /// instead of queueing a duplicate behind it on the serial MLX thread.
+    private var pending: [String: [([Float]?) -> Void]] = [:]
 
     /// Plays generated PCM through the AEC graph. Weak: it's the `Listener`, owned by
     /// `SessionController`, which also owns this engine's `Speaker`.
@@ -79,22 +91,62 @@ final class KokoroEngine: SpeechEngine {
         isSpeaking = true
         generation &+= 1
         let gen = generation
-        let synth = synth
+        generate(line) { [weak self] audio in
+            guard let self, gen == self.generation else { return }   // superseded by stop/newer speak
+            guard let audio, let player = self.player else {
+                // Generation failed (bad voice / model) — don't wedge the session;
+                // report it as a finished utterance so the controller advances.
+                self.finish(gen: gen)
+                return
+            }
+            player.play(audio, sampleRate: Double(KokoroTTS.Constants.samplingRate)) { [weak self] in
+                self?.finish(gen: gen)
+            }
+        }
+    }
+
+    /// Synthesize `line` ahead of time so a later `speak` of it plays instantly. Does not
+    /// touch `generation`, so it never disturbs what's currently playing.
+    func prefetch(_ line: String) {
+        generate(line) { _ in }
+    }
+
+    /// Drop every cached clip except the ones for `lines` (under the current voice/speed),
+    /// keeping memory bounded to the neighbors worth holding ready.
+    func retain(_ lines: [String]) {
         let voice = Self.currentVoiceName
         let speed = rate
+        let keep = Set(lines.map { Self.cacheKey(line: $0, voice: voice, speed: speed) })
+        cache = cache.filter { keep.contains($0.key) }
+    }
+
+    /// Resolve the PCM for `line` under the current voice/speed and hand it to `then` (always
+    /// on the main actor, exactly once): serve it from `cache`, join an in-flight job for the
+    /// same key via `pending`, or enqueue a fresh MLX generation. `then` may receive nil if
+    /// generation fails.
+    private func generate(_ line: String, then: @escaping ([Float]?) -> Void) {
+        let voice = Self.currentVoiceName
+        let speed = rate
+        let key = Self.cacheKey(line: line, voice: voice, speed: speed)
+
+        if let cached = cache[key] {
+            then(cached)   // synchronous on the current main-actor turn — instant playback
+            return
+        }
+        if pending[key] != nil {
+            pending[key]?.append(then)
+            return
+        }
+        pending[key] = [then]
+
+        let synth = synth
         queue.async {
             let audio = synth.generate(text: line, voiceName: voice, speed: speed)
             onMainQueue { [weak self] in
-                guard let self, gen == self.generation else { return }
-                guard let audio, let player = self.player else {
-                    // Generation failed (bad voice / model) — don't wedge the session;
-                    // report it as a finished utterance so the controller advances.
-                    self.finish(gen: gen)
-                    return
-                }
-                player.play(audio, sampleRate: Double(KokoroTTS.Constants.samplingRate)) { [weak self] in
-                    self?.finish(gen: gen)
-                }
+                guard let self else { return }
+                if let audio { self.cache[key] = audio }
+                let waiters = self.pending.removeValue(forKey: key) ?? []
+                for waiter in waiters { waiter(audio) }
             }
         }
     }
@@ -103,6 +155,7 @@ final class KokoroEngine: SpeechEngine {
         generation &+= 1   // discard any in-flight generation's result
         isSpeaking = false
         player?.stopPlayback()
+        // Cache survives stop() on purpose, so a barge-in can replay neighbors instantly.
     }
 
     /// Clear `isSpeaking` and fire `onFinish` iff `gen` is still the current utterance.
@@ -116,6 +169,12 @@ final class KokoroEngine: SpeechEngine {
     /// takes effect on the next pair. Defaults to Kokoro's flagship US-English voice.
     static var currentVoiceName: String {
         UserDefaults.standard.string(forKey: "kokoroVoice") ?? "af_heart"
+    }
+
+    /// Identity of a rendered clip: text plus the voice and speed it was rendered at, so the
+    /// cache never serves a clip in the wrong voice or at the wrong speed.
+    static func cacheKey(line: String, voice: String, speed: Float) -> String {
+        "\(voice)|\(speed)|\(line)"
     }
 }
 

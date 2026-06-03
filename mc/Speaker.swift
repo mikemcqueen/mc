@@ -49,6 +49,12 @@ final class Speaker: ObservableObject {
         engine?.stop()
     }
 
+    // MARK: - Pre-generation (forwarded to the active engine; no-op on streaming engines)
+
+    var supportsPreGeneration: Bool { currentEngine().supportsPreGeneration }
+    func prefetch(_ line: String) { currentEngine().prefetch(line) }
+    func retain(_ lines: [String]) { currentEngine().retain(lines) }
+
     // MARK: - Engine selection
 
     private func currentEngine() -> SpeechEngine {
