@@ -134,7 +134,14 @@ private final class KokoroSynth: @unchecked Sendable {
     /// model/voice can't be loaded or generation throws. Lazily loads the (expensive)
     /// model on first call.
     func generate(text: String, voiceName: String, speed: Float) -> [Float]? {
-        if tts == nil { tts = KokoroTTS(modelPath: modelURL) }
+        if tts == nil {
+            // MLX's buffer-reuse cache defaults to the whole device memory limit, so on a
+            // phone with abundant RAM it never returns the large per-utterance activation
+            // buffers to the OS — the footprint climbs every pair until iOS OOM-kills the
+            // app. Cap it so freed buffers are reclaimed on the next allocation.
+            MLX.GPU.set(cacheLimit: 32 * 1024 * 1024)
+            tts = KokoroTTS(modelPath: modelURL)
+        }
         guard let tts, let voice = voice(named: voiceName) else { return nil }
         // Voice-name prefix selects the accent: 'a' = US English, 'b' = GB English.
         // (Other Kokoro languages need eSpeakNG, which KokoroSwift ships disabled.)
